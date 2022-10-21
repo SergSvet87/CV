@@ -16,6 +16,15 @@ const imagemin = require('gulp-imagemin');
 const htmlmin = require('gulp-htmlmin');
 const size = require('gulp-size');
 const newer = require('gulp-newer');
+
+const argv = require('yargs').argv;
+const gulpif = require('gulp-if');
+const mediaQueries = require('gulp-group-css-media-queries');
+const webpackStream = require('webpack-stream');
+const webpack = require('webpack');
+const plumber = require('gulp-plumber');
+const webp = require('gulp-webp');
+
 const rigger = require("gulp-rigger");
 const ts = require('gulp-typescript');
 const coffee = require('gulp-coffee');
@@ -52,6 +61,20 @@ const paths = {
     src: 'src/img/**',
     dest: 'dist/img/'
   }
+}
+
+/**
+ * Dev check
+ */
+const isDev = function () {
+  return !argv.prod;
+}
+
+/**
+* Prod check
+*/
+const isProd = function () {
+  return !!argv.prod;
 }
 
 // Очистка каталогов и файлов
@@ -114,6 +137,7 @@ function styles() {
     .pipe(autoprefixer({
       cascade: false
     }))
+    .pipe(gulpif(isProd(), mediaQueries()))
     .pipe(cleanCSS({
       level: 2
     }))
@@ -130,9 +154,34 @@ function styles() {
 }
 
 // Обработка скриптов
+const webpackConf = {
+  mode: isDev() ? 'development' : 'production',
+  devtool: isDev() ? 'eval-source-map' : false,
+  optimization: {
+    minimize: false
+  },
+  output: {
+    filename: 'app.js',
+  },
+  module: {
+    rules: []
+  }
+}
+
+if (isProd()) {
+  webpackConf.module.rules.push({
+    test: /\.(js)$/,
+    exclude: /(node_modules)/,
+    loader: 'babel-loader'
+  });
+}
+
 function scripts() {
   return gulp.src(paths.scripts.src)
     .pipe(sourcemaps.init())
+    .pipe(plumber())
+    .pipe(webpackStream(webpackConf, webpack))
+    .pipe(gulpif(isProd(), gulp.dest(paths.scripts.dest)))
     .pipe(rigger())
     /* .pipe(coffee({
        bare: true
@@ -144,7 +193,7 @@ function scripts() {
     .pipe(babel({
       presets: ['@babel/env']
     }))
-    .pipe(uglify())
+    .pipe(gulpif(isProd(), uglify()))
     .pipe(concat('main.min.js'))
     .pipe(sourcemaps.write('.'))
     .pipe(size({
@@ -162,9 +211,11 @@ function images() {
       progressive: true,
       optimizationLevel: 3
     }))
+    //.pipe(webp())
     .pipe(size({
       showFiles: true
     }))
+    .pipe(webp())
     .pipe(gulp.dest(paths.images.dest))
 }
 
@@ -173,7 +224,9 @@ function watch() {
   browserSync.init({
     server: {
       baseDir: "./dist/"
-    }
+    },
+    notify: false, // Отключаем уведомления
+    online: true // Режим работы: true или false
   });
   gulp.watch(paths.html.dest).on('change', browserSync.reload)
   gulp.watch(paths.html.src, html)
